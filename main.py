@@ -4,12 +4,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from typing import List, Optional
 from contextlib import asynccontextmanager
+import httpx
 
 from database import get_db, init_db
 from models import (
     TradeOfferDB, TradeOfferCreate, TradeOfferUpdate, TradeOfferResponse,
     TradeOfferListParams, MatchStatistics, TradeOfferStatus, ErrorResponse
 )
+
+# Notification service URL
+NOTIFICATION_SERVICE_URL = "http://notifications_service:8000"
 
 
 @asynccontextmanager
@@ -40,6 +44,67 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+async def send_trade_notification(offer: TradeOfferDB, new_status: TradeOfferStatus, actor_id: str):
+    """
+    Send notification when a trade offer status changes.
+    
+    Args:
+        offer: The trade offer that was updated
+        new_status: The new status of the offer
+        actor_id: The user ID who performed the action
+    """
+    # Determine recipient (opposite of actor)
+    recipient_id = offer.proposer_id if actor_id == offer.receiver_id else offer.receiver_id
+    
+    # Create notification data based on status
+    notification_data = {
+        "user_id": recipient_id,
+        "related_offer_id": offer.id,
+        "related_user_id": actor_id
+    }
+    
+    if new_status == TradeOfferStatus.accepted:
+        notification_data["type"] = "trade_offer_accepted"
+        notification_data["title"] = "Trade Offer Accepted! 🎉"
+        notification_data["body"] = "Great news! Your trade offer has been accepted."
+    elif new_status == TradeOfferStatus.rejected:
+        notification_data["type"] = "trade_offer_rejected"
+        notification_data["title"] = "Trade Offer Declined"
+        notification_data["body"] = "Your trade offer was declined. Keep exploring!"
+    elif new_status == TradeOfferStatus.cancelled:
+        notification_data["type"] = "trade_offer_cancelled"
+        notification_data["title"] = "Trade Offer Cancelled"
+        notification_data["body"] = "A trade offer you received has been cancelled."
+    elif new_status == TradeOfferStatus.completed:
+        notification_data["type"] = "trade_completed"
+        notification_data["title"] = "Trade Completed! ✅"
+        notification_data["body"] = "Congratulations! Your trade has been completed."
+    else:
+        print(f"ℹ️ No notification needed for status: {new_status.value}")
+        return  # No notification for other statuses
+    
+    print(f"📤 Attempting to send notification to user {recipient_id} for offer {offer.id}")
+    print(f"📤 Notification data: {notification_data}")
+    print(f"📤 Notification service URL: {NOTIFICATION_SERVICE_URL}/api/v1/notifications")
+    
+    # Send notification to notification service
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(
+                f"{NOTIFICATION_SERVICE_URL}/api/v1/notifications",
+                json=notification_data
+            )
+            print(f"📤 Notification service response status: {response.status_code}")
+            print(f"📤 Notification service response: {response.text}")
+            if response.status_code == 201:
+                print(f"✅ Notification sent successfully to user {recipient_id} for offer {offer.id}")
+            else:
+                print(f"⚠️ Failed to send notification: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"❌ Error sending notification: {type(e).__name__}: {e}")
+        # Don't fail the trade status update if notification fails
 
 
 @app.get("/", tags=["Health"])
@@ -325,6 +390,9 @@ async def update_trade_offer_status(
     
     db.commit()
     db.refresh(db_offer)
+    
+    # Send notification to the other party
+    await send_trade_notification(db_offer, new_status, user_id)
     
     return db_offer
 
