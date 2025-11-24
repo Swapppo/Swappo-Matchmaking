@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: swappo_matchmaking_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: swappo_matchmaking
+      POSTGRES_USER: swappo_user
+      POSTGRES_PASSWORD: swappo_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U swappo_user -d swappo_matchmaking"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - swappo_network
+
+  # matchmaking Service
+  matchmaking_service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: swappo_matchmaking_service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://swappo_user:swappo_pass@postgres:5432/swappo_matchmaking
+      SQL_ECHO: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - swappo_network
+    volumes:
+      - ./:/app  # Mount for development (remove in production)
+
+  # PgAdmin (Optional - for database management)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: swappo_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@swappo.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - swappo_network
+    profiles:
+      - tools  # Only start with --profile tools
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  swappo_network:
+    driver: bridge
