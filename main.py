@@ -12,8 +12,9 @@ from models import (
     TradeOfferListParams, MatchStatistics, TradeOfferStatus, ErrorResponse
 )
 
-# Notification service URL
+# Service URLs
 NOTIFICATION_SERVICE_URL = "http://notifications_service:8000"
+CHAT_SERVICE_URL = "http://chat_service:8000"
 
 
 @asynccontextmanager
@@ -44,6 +45,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+async def create_chat_room(offer: TradeOfferDB):
+    """
+    Create a chat room for an accepted trade offer.
+    
+    Args:
+        offer: The accepted trade offer
+    """
+    chat_room_data = {
+        "trade_offer_id": offer.id,
+        "user1_id": offer.proposer_id,
+        "user2_id": offer.receiver_id
+    }
+    
+    print(f"💬 Attempting to create chat room for offer {offer.id}")
+    print(f"💬 Chat room data: {chat_room_data}")
+    
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(
+                f"{CHAT_SERVICE_URL}/api/v1/chat-rooms",
+                json=chat_room_data
+            )
+            print(f"💬 Chat service response status: {response.status_code}")
+            if response.status_code == 201:
+                print(f"✅ Chat room created successfully")
+                return response.json()
+            else:
+                print(f"⚠️ Chat service returned: {response.text}")
+                return None
+    except Exception as e:
+        print(f"⚠️ Failed to create chat room: {str(e)}")
+        return None
 
 
 async def send_trade_notification(offer: TradeOfferDB, new_status: TradeOfferStatus, actor_id: str):
@@ -393,6 +428,10 @@ async def update_trade_offer_status(
     
     # Send notification to the other party
     await send_trade_notification(db_offer, new_status, user_id)
+    
+    # Create chat room if offer is accepted
+    if new_status == TradeOfferStatus.accepted:
+        await create_chat_room(db_offer)
     
     return db_offer
 
