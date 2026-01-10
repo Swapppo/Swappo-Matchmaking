@@ -21,7 +21,7 @@ import catalog_pb2_grpc
 # Circuit breaker for gRPC calls
 # Opens after 5 failures, stays open for 60s, then half-open
 catalog_circuit_breaker = CircuitBreaker(
-    fail_max=5, timeout_duration=60, exclude=[], name="catalog_grpc"
+    fail_max=5, reset_timeout=60, exclude=[], name="catalog_grpc"
 )
 
 
