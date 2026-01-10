@@ -1,0 +1,68 @@
+# Auto-Deploy to GKE Workflow
+# This workflow automatically deploys services to GKE when pushed to main
+
+name: Deploy to GKE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Manual trigger
+
+env:
+  SERVICE_NAME: matchmaking-service
+  GKE_CLUSTER: swappo-cluster
+  GKE_ZONE: europe-west3
+  GCP_PROJECT_ID: swapppo
+  NAMESPACE: swappo
+
+jobs:
+  deploy:
+    name: Deploy to GKE
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Install gke-gcloud-auth-plugin
+      run: |
+        gcloud components install gke-gcloud-auth-plugin --quiet
+
+    - name: Configure kubectl
+      run: |
+        gcloud container clusters get-credentials ${{ env.GKE_CLUSTER }} \
+          --zone ${{ env.GKE_ZONE }} \
+          --project ${{ env.GCP_PROJECT_ID }}
+
+    - name: Restart deployment
+      run: |
+        kubectl rollout restart deployment/${{ env.SERVICE_NAME }} -n ${{ env.NAMESPACE }}
+
+    - name: Wait for rollout to complete
+      run: |
+        kubectl rollout status deployment/${{ env.SERVICE_NAME }} -n ${{ env.NAMESPACE }} --timeout=5m
+
+    - name: Verify deployment
+      run: |
+        kubectl get pods -n ${{ env.NAMESPACE }} -l app=${{ env.SERVICE_NAME }}
+        echo "✅ Deployment successful!"
+
+    - name: Cleanup old pods
+      run: |
+        # Delete any pods in CrashLoopBackOff or Error state
+        kubectl get pods -n ${{ env.NAMESPACE }} -l app=${{ env.SERVICE_NAME }}-service \
+          --field-selector=status.phase=Failed -o name | xargs -r kubectl delete -n ${{ env.NAMESPACE }}
+      continue-on-error: true
