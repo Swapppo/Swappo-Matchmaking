@@ -4,6 +4,7 @@ from typing import List, Optional
 import grpc
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from pybreaker import CircuitBreakerError
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -261,6 +262,12 @@ async def create_trade_offer(
             )
 
         print("✅ All items validated via gRPC for trade offer")
+    except CircuitBreakerError:
+        print("⚠️ Circuit breaker is OPEN - Catalog service is unavailable")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Catalog service unavailable - circuit breaker open",
+        )
     except grpc.RpcError as e:
         print(f"❌ gRPC error during item validation: {e}")
         raise HTTPException(
