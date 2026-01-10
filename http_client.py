@@ -14,11 +14,11 @@ from tenacity import (
 
 # Circuit breakers for different services
 notification_circuit_breaker = CircuitBreaker(
-    fail_max=5, timeout_duration=60, exclude=[], name="notifications_http"
+    fail_max=5, reset_timeout=60, exclude=[], name="notifications_http"
 )
 
 chat_circuit_breaker = CircuitBreaker(
-    fail_max=5, timeout_duration=60, exclude=[], name="chat_http"
+    fail_max=5, reset_timeout=60, exclude=[], name="chat_http"
 )
 
 
