@@ -1,0 +1,162 @@
+"""
+gRPC Client for Catalog Service
+Used by Matchmaking service to fetch item details
+"""
+
+from typing import Any, Dict, List, Optional
+
+import grpc
+
+import catalog_pb2
+import catalog_pb2_grpc
+
+
+class CatalogClient:
+    """Client for communicating with Catalog Service via gRPC"""
+
+    def __init__(self, catalog_service_url: str = "catalog-service:50051"):
+        """
+        Initialize the gRPC client
+
+        Args:
+            catalog_service_url: URL of the catalog service (default: catalog-service:50051)
+        """
+        self.catalog_service_url = catalog_service_url
+        self.channel = None
+        self.stub = None
+
+    def connect(self):
+        """Establish connection to the catalog service"""
+        if not self.channel:
+            self.channel = grpc.insecure_channel(self.catalog_service_url)
+            self.stub = catalog_pb2_grpc.CatalogServiceStub(self.channel)
+            print(f"✅ Connected to Catalog gRPC service at {self.catalog_service_url}")
+
+    def close(self):
+        """Close the gRPC channel"""
+        if self.channel:
+            self.channel.close()
+            self.channel = None
+            self.stub = None
+            print("✅ Closed Catalog gRPC connection")
+
+    def get_item(self, item_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get a single item by ID
+
+        Args:
+            item_id: The ID of the item to fetch
+
+        Returns:
+            Dictionary with item details, or None if not found
+        """
+        self.connect()
+
+        try:
+            request = catalog_pb2.GetItemRequest(item_id=item_id)
+            response = self.stub.GetItem(request)
+
+            return {
+                "id": response.id,
+                "name": response.name,
+                "description": response.description,
+                "category": response.category,
+                "image_urls": list(response.image_urls),
+                "location_lat": response.location_lat,
+                "location_lon": response.location_lon,
+                "owner_id": response.owner_id,
+                "status": response.status,
+                "created_at": response.created_at,
+                "updated_at": response.updated_at,
+            }
+        except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                print(f"⚠️ Item {item_id} not found via gRPC")
+                return None
+            else:
+                print(f"❌ gRPC error getting item {item_id}: {e}")
+                raise
+
+    def get_items(self, item_ids: List[int]) -> Dict[str, Any]:
+        """
+        Get multiple items by IDs (batch request)
+
+        Args:
+            item_ids: List of item IDs to fetch
+
+        Returns:
+            Dictionary with 'items' (list of item dicts) and 'not_found_ids' (list of IDs)
+        """
+        self.connect()
+
+        try:
+            request = catalog_pb2.GetItemsRequest(item_ids=item_ids)
+            response = self.stub.GetItems(request)
+
+            items = [
+                {
+                    "id": item.id,
+                    "name": item.name,
+                    "description": item.description,
+                    "category": item.category,
+                    "image_urls": list(item.image_urls),
+                    "location_lat": item.location_lat,
+                    "location_lon": item.location_lon,
+                    "owner_id": item.owner_id,
+                    "status": item.status,
+                    "created_at": item.created_at,
+                    "updated_at": item.updated_at,
+                }
+                for item in response.items
+            ]
+
+            return {"items": items, "not_found_ids": list(response.not_found_ids)}
+        except grpc.RpcError as e:
+            print(f"❌ gRPC error getting items: {e}")
+            raise
+
+    def validate_items(self, item_ids: List[int]) -> List[Dict[str, Any]]:
+        """
+        Validate that items exist and check if they're active
+
+        Args:
+            item_ids: List of item IDs to validate
+
+        Returns:
+            List of validation results with item_id, exists, is_active, owner_id
+        """
+        self.connect()
+
+        try:
+            request = catalog_pb2.ValidateItemsRequest(item_ids=item_ids)
+            response = self.stub.ValidateItems(request)
+
+            return [
+                {
+                    "item_id": validation.item_id,
+                    "exists": validation.exists,
+                    "is_active": validation.is_active,
+                    "owner_id": validation.owner_id,
+                }
+                for validation in response.validations
+            ]
+        except grpc.RpcError as e:
+            print(f"❌ gRPC error validating items: {e}")
+            raise
+
+
+# Global client instance (singleton pattern)
+_catalog_client = None
+
+
+def get_catalog_client() -> CatalogClient:
+    """
+    Get or create the global catalog client instance
+
+    Returns:
+        CatalogClient instance
+    """
+    global _catalog_client
+    if _catalog_client is None:
+        _catalog_client = CatalogClient()
+    return _catalog_client

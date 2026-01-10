@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package catalog;
+
+// Catalog Service - provides item information to other services via gRPC
+service CatalogService {
+  // Get a single item by ID
+  rpc GetItem(GetItemRequest) returns (ItemResponse);
+
+  // Get multiple items by IDs (batch request)
+  rpc GetItems(GetItemsRequest) returns (GetItemsResponse);
+
+  // Check if items exist and are active
+  rpc ValidateItems(ValidateItemsRequest) returns (ValidateItemsResponse);
+}
+
+// Request Messages
+message GetItemRequest {
+  int32 item_id = 1;
+}
+
+message GetItemsRequest {
+  repeated int32 item_ids = 1;
+}
+
+message ValidateItemsRequest {
+  repeated int32 item_ids = 1;
+}
+
+// Response Messages
+message ItemResponse {
+  int32 id = 1;
+  string name = 2;
+  string description = 3;
+  string category = 4;
+  repeated string image_urls = 5;
+  double location_lat = 6;
+  double location_lon = 7;
+  string owner_id = 8;
+  string status = 9;
+  string created_at = 10;
+  string updated_at = 11;
+}
+
+message GetItemsResponse {
+  repeated ItemResponse items = 1;
+  repeated int32 not_found_ids = 2;
+}
+
+message ItemValidation {
+  int32 item_id = 1;
+  bool exists = 2;
+  bool is_active = 3;
+  string owner_id = 4;
+}
+
+message ValidateItemsResponse {
+  repeated ItemValidation validations = 1;
+}

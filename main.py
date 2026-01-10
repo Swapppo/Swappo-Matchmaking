@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
+import grpc
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +9,9 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from database import get_db, init_db
+
+# Import gRPC client
+from grpc_client import get_catalog_client
 from models import (
     ErrorResponse,
     MatchStatistics,
@@ -235,6 +239,65 @@ async def create_trade_offer(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Same item cannot be both offered and requested",
+        )
+
+    # ✨ Validate items exist via gRPC
+    catalog_client = get_catalog_client()
+    all_item_ids = offer_data.offered_item_ids + offer_data.requested_item_ids
+
+    try:
+        validations = catalog_client.validate_items(all_item_ids)
+
+        # Check if all items exist
+        invalid_items = [v for v in validations if not v["exists"]]
+        if invalid_items:
+            invalid_ids = [v["item_id"] for v in invalid_items]
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Items not found: {invalid_ids}",
+            )
+
+        # Check if all items are active
+        inactive_items = [v for v in validations if not v["is_active"]]
+        if inactive_items:
+            inactive_ids = [v["item_id"] for v in inactive_items]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Items are not active: {inactive_ids}",
+            )
+
+        # Validate ownership: offered items must belong to proposer
+        offered_validations = [v for v in validations if v["item_id"] in offered_set]
+        wrong_owner = [
+            v for v in offered_validations if v["owner_id"] != offer_data.proposer_id
+        ]
+        if wrong_owner:
+            wrong_ids = [v["item_id"] for v in wrong_owner]
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Proposer does not own offered items: {wrong_ids}",
+            )
+
+        # Validate ownership: requested items must belong to receiver
+        requested_validations = [
+            v for v in validations if v["item_id"] in requested_set
+        ]
+        wrong_owner = [
+            v for v in requested_validations if v["owner_id"] != offer_data.receiver_id
+        ]
+        if wrong_owner:
+            wrong_ids = [v["item_id"] for v in wrong_owner]
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Receiver does not own requested items: {wrong_ids}",
+            )
+
+        print("✅ All items validated via gRPC for trade offer")
+    except grpc.RpcError as e:
+        print(f"❌ gRPC error during item validation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Catalog service unavailable",
         )
 
     # Create trade offer in database

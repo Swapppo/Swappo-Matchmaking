@@ -1,0 +1,9 @@
+[flake8]
+max-line-length = 127
+exclude =
+    catalog_pb2.py
+    catalog_pb2_grpc.py
+    __pycache__
+    .git
+    venv
+    env
