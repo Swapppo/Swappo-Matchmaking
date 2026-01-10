@@ -1,9 +1,11 @@
+import time
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
 import grpc
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 from pybreaker import CircuitBreakerError
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -15,6 +17,13 @@ from grpc_client import get_catalog_client
 
 # Import HTTP resilience utilities
 from http_client import create_chat_room_resilient, send_notification_resilient
+
+# Import metrics
+from metrics import (
+    record_http_request,
+    trade_offers_created_total,
+    update_trade_offer_metrics,
+)
 from models import (
     ErrorResponse,
     MatchStatistics,
@@ -61,6 +70,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialize Prometheus metrics instrumentation
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+
+
+# Middleware to track request timing and metrics
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """Track request metrics"""
+    start_time = time.time()
+    response = await call_next(request)
+    duration = time.time() - start_time
+
+    # Record metrics (exclude /metrics endpoint)
+    if request.url.path != "/metrics":
+        record_http_request(
+            method=request.method,
+            endpoint=request.url.path,
+            status_code=response.status_code,
+            duration=duration,
+        )
+
+    return response
 
 
 async def create_chat_room(offer: TradeOfferDB):
@@ -288,6 +320,10 @@ async def create_trade_offer(
     db.add(db_offer)
     db.commit()
     db.refresh(db_offer)
+
+    # Track metrics
+    trade_offers_created_total.inc()
+    update_trade_offer_metrics(db)
 
     return db_offer
 

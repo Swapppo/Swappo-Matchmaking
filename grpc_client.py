@@ -4,6 +4,7 @@ Used by Matchmaking service to fetch item details
 Includes Circuit Breaker and Retry patterns for resilience
 """
 
+import time
 from typing import Any, Dict, List, Optional
 
 import grpc
@@ -17,6 +18,13 @@ from tenacity import (
 
 import catalog_pb2
 import catalog_pb2_grpc
+
+# Import metrics
+from metrics import (
+    circuit_breaker_failures_total,
+    record_circuit_breaker_state,
+    record_grpc_request,
+)
 
 # Circuit breaker for gRPC calls
 # Opens after 5 failures, stays open for 60s, then half-open
@@ -158,6 +166,8 @@ class CatalogClient:
             List of validation results with item_id, exists, is_active, owner_id
         """
         self.connect()
+        start_time = time.time()
+        status = "success"
 
         try:
             request = catalog_pb2.ValidateItemsRequest(item_ids=item_ids)
@@ -173,11 +183,18 @@ class CatalogClient:
                 for validation in response.validations
             ]
         except CircuitBreakerError:
+            status = "circuit_breaker_open"
+            circuit_breaker_failures_total.labels(circuit_name="catalog_grpc").inc()
+            record_circuit_breaker_state("catalog_grpc", "open")
             print("⚠️ Circuit breaker is OPEN - Catalog service is unavailable")
             raise
         except grpc.RpcError as e:
+            status = "grpc_error"
             print(f"❌ gRPC error validating items: {e}")
             raise
+        finally:
+            duration = time.time() - start_time
+            record_grpc_request("ValidateItems", status, duration)
 
 
 # Global client instance (singleton pattern)
