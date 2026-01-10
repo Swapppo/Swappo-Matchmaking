@@ -16,7 +16,7 @@ from database import get_db, init_db
 from grpc_client import get_catalog_client
 
 # Import HTTP resilience utilities
-from http_client import create_chat_room_resilient, send_notification_resilient
+from http_client import create_chat_room_resilient
 
 # Import metrics
 from metrics import (
@@ -34,6 +34,9 @@ from models import (
     TradeOfferUpdate,
 )
 
+# Import RabbitMQ publisher for async notifications
+from rabbitmq_publisher import get_notification_publisher
+
 # Service URLs
 NOTIFICATION_SERVICE_URL = "http://notifications_service:8000"
 CHAT_SERVICE_URL = "http://chat_service:8000"
@@ -46,9 +49,16 @@ async def lifespan(app: FastAPI):
     """
     # Startup: Initialize database
     init_db()
+
+    # Initialize RabbitMQ publisher
+    publisher = get_notification_publisher()
+    print("✅ RabbitMQ publisher initialized")
+
     yield
-    # Shutdown: Cleanup if needed
-    pass
+
+    # Shutdown: Cleanup
+    publisher.close()
+    print("✅ RabbitMQ publisher closed")
 
 
 # Initialize FastAPI app
@@ -161,10 +171,14 @@ async def send_trade_notification(
         f"📤 Attempting to send notification to user {recipient_id} for offer {offer.id}"
     )
 
-    # Send notification with retry and circuit breaker
-    await send_notification_resilient(
-        f"{NOTIFICATION_SERVICE_URL}/api/v1/notifications", notification_data
-    )
+    # Send notification via RabbitMQ (async)
+    publisher = get_notification_publisher()
+    success = publisher.publish_notification(notification_data)
+
+    if success:
+        print("✅ Notification published to queue successfully")
+    else:
+        print("⚠️ Failed to publish notification to queue")
 
 
 @app.get("/", tags=["Health"])
