@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 from typing import List, Optional
 
 import grpc
-import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import or_
@@ -12,6 +11,9 @@ from database import get_db, init_db
 
 # Import gRPC client
 from grpc_client import get_catalog_client
+
+# Import HTTP resilience utilities
+from http_client import create_chat_room_resilient, send_notification_resilient
 from models import (
     ErrorResponse,
     MatchStatistics,
@@ -62,7 +64,7 @@ app.add_middleware(
 
 async def create_chat_room(offer: TradeOfferDB):
     """
-    Create a chat room for an accepted trade offer.
+    Create a chat room for an accepted trade offer (with retry and circuit breaker).
 
     Args:
         offer: The accepted trade offer
@@ -74,23 +76,9 @@ async def create_chat_room(offer: TradeOfferDB):
     }
 
     print(f"💬 Attempting to create chat room for offer {offer.id}")
-    print(f"💬 Chat room data: {chat_room_data}")
-
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.post(
-                f"{CHAT_SERVICE_URL}/api/v1/chat-rooms", json=chat_room_data
-            )
-            print(f"💬 Chat service response status: {response.status_code}")
-            if response.status_code == 201:
-                print("✅ Chat room created successfully")
-                return response.json()
-            else:
-                print(f"⚠️ Chat service returned: {response.text}")
-                return None
-    except Exception as e:
-        print(f"⚠️ Failed to create chat room: {str(e)}")
-        return None
+    return await create_chat_room_resilient(
+        f"{CHAT_SERVICE_URL}/api/v1/chat-rooms", chat_room_data
+    )
 
 
 async def send_trade_notification(
@@ -139,31 +127,11 @@ async def send_trade_notification(
     print(
         f"📤 Attempting to send notification to user {recipient_id} for offer {offer.id}"
     )
-    print(f"📤 Notification data: {notification_data}")
-    print(
-        f"📤 Notification service URL: {NOTIFICATION_SERVICE_URL}/api/v1/notifications"
-    )
 
-    # Send notification to notification service
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.post(
-                f"{NOTIFICATION_SERVICE_URL}/api/v1/notifications",
-                json=notification_data,
-            )
-            print(f"📤 Notification service response status: {response.status_code}")
-            print(f"📤 Notification service response: {response.text}")
-            if response.status_code == 201:
-                print(
-                    f"✅ Notification sent successfully to user {recipient_id} for offer {offer.id}"
-                )
-            else:
-                print(
-                    f"⚠️ Failed to send notification: {response.status_code} - {response.text}"
-                )
-    except Exception as e:
-        print(f"❌ Error sending notification: {type(e).__name__}: {e}")
-        # Don't fail the trade status update if notification fails
+    # Send notification with retry and circuit breaker
+    await send_notification_resilient(
+        f"{NOTIFICATION_SERVICE_URL}/api/v1/notifications", notification_data
+    )
 
 
 @app.get("/", tags=["Health"])

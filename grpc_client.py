@@ -1,14 +1,28 @@
 """
 gRPC Client for Catalog Service
 Used by Matchmaking service to fetch item details
+Includes Circuit Breaker and Retry patterns for resilience
 """
 
 from typing import Any, Dict, List, Optional
 
 import grpc
+from pybreaker import CircuitBreaker, CircuitBreakerError
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 import catalog_pb2
 import catalog_pb2_grpc
+
+# Circuit breaker for gRPC calls
+# Opens after 5 failures, stays open for 60s, then half-open
+catalog_circuit_breaker = CircuitBreaker(
+    fail_max=5, timeout_duration=60, exclude=[], name="catalog_grpc"
+)
 
 
 class CatalogClient:
@@ -40,9 +54,15 @@ class CatalogClient:
             self.stub = None
             print("✅ Closed Catalog gRPC connection")
 
+    @retry(
+        retry=retry_if_exception_type(grpc.RpcError),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        reraise=True,
+    )
     def get_item(self, item_id: int) -> Optional[Dict[str, Any]]:
         """
-        Get a single item by ID
+        Get a single item by ID (with retry on failure)
 
         Args:
             item_id: The ID of the item to fetch
@@ -54,7 +74,7 @@ class CatalogClient:
 
         try:
             request = catalog_pb2.GetItemRequest(item_id=item_id)
-            response = self.stub.GetItem(request)
+            response = catalog_circuit_breaker.call(self.stub.GetItem, request)
 
             return {
                 "id": response.id,
@@ -77,9 +97,15 @@ class CatalogClient:
                 print(f"❌ gRPC error getting item {item_id}: {e}")
                 raise
 
+    @retry(
+        retry=retry_if_exception_type(grpc.RpcError),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        reraise=True,
+    )
     def get_items(self, item_ids: List[int]) -> Dict[str, Any]:
         """
-        Get multiple items by IDs (batch request)
+        Get multiple items by IDs (batch request with retry)
 
         Args:
             item_ids: List of item IDs to fetch
@@ -91,7 +117,7 @@ class CatalogClient:
 
         try:
             request = catalog_pb2.GetItemsRequest(item_ids=item_ids)
-            response = self.stub.GetItems(request)
+            response = catalog_circuit_breaker.call(self.stub.GetItems, request)
 
             items = [
                 {
@@ -115,9 +141,15 @@ class CatalogClient:
             print(f"❌ gRPC error getting items: {e}")
             raise
 
+    @retry(
+        retry=retry_if_exception_type(grpc.RpcError),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        reraise=True,
+    )
     def validate_items(self, item_ids: List[int]) -> List[Dict[str, Any]]:
         """
-        Validate that items exist and check if they're active
+        Validate that items exist and check if they're active (with retry)
 
         Args:
             item_ids: List of item IDs to validate
@@ -129,7 +161,7 @@ class CatalogClient:
 
         try:
             request = catalog_pb2.ValidateItemsRequest(item_ids=item_ids)
-            response = self.stub.ValidateItems(request)
+            response = catalog_circuit_breaker.call(self.stub.ValidateItems, request)
 
             return [
                 {
@@ -140,6 +172,9 @@ class CatalogClient:
                 }
                 for validation in response.validations
             ]
+        except CircuitBreakerError:
+            print("⚠️ Circuit breaker is OPEN - Catalog service is unavailable")
+            raise
         except grpc.RpcError as e:
             print(f"❌ gRPC error validating items: {e}")
             raise

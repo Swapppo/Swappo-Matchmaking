@@ -12,6 +12,10 @@ python-multipart==0.0.20
 
 httpx==0.27.2
 
+# Resilience patterns
+tenacity==8.2.3
+pybreaker==1.0.1
+
 # gRPC
 grpcio==1.76.0
 grpcio-tools==1.76.0
