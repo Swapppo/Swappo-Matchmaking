@@ -1,202 +1,80 @@
-# Swappo Matchmaking Service
+# Swappo-Matchmaking
 
-## Overview
-
-The Swappo Matchmaking Service is a RESTful microservice responsible for managing trade offers between users in the Swappo platform. This service handles the creation, tracking, and lifecycle management of item swap proposals, supporting various trade configurations including:
-
-- **Single item for single item trades** (1:1)
-- **Multiple items for single item trades** (N:1)
-- **Multiple items for multiple items trades** (N:M)
-
-The service is built with FastAPI and PostgreSQL, following the same architectural patterns as the Auth and Catalog services.
+Trade offer microservice for the Swappo platform managing swap proposals between users with support for 1:1, N:1, and N:M item trades.
 
 ## Features
 
-### Trade Offer Management
-- Create trade offers with offered and requested items
-- View trade offer details
-- List trade offers with filtering options
-- Update trade offer status (accept, reject, cancel, complete)
-- Delete pending trade offers
+- **Trade Offer Lifecycle**: Create, accept, reject, cancel, complete offers
+- **Multi-Item Support**: 1:1, N:1, N:M item trades
+- **User Views**: Filter by sent/received, status, pagination
+- **gRPC Integration**: Validate items via Catalog service
+- **RabbitMQ Messaging**: Async notifications for status changes
+- **Circuit Breaker**: Resilient Chat service integration
+- **Statistics**: User trade metrics and analytics
+- **Prometheus Metrics**: Built-in monitoring
 
-### User-Centric Views
-- Get received offers for a user
-- Get sent offers for a user
-- Filter offers by status and role (proposer/receiver)
-- Pagination support for large offer lists
+## Quick Start
 
-### Item Tracking
-- Find all trade offers involving a specific item
-- Prevent duplicate items in offers
-- Validate item ownership logic
+### Docker (Recommended)
 
-### Statistics
-- User-level trade statistics
-- Track pending, accepted, rejected, and completed offers
-
-## Architecture
-
-```
-Swappo-Matchmaking/
-├── main.py              # FastAPI application and endpoints
-├── models.py            # Pydantic and SQLAlchemy models
-├── database.py          # Database connection and session management
-├── requirements.txt     # Python dependencies
-├── Dockerfile          # Container configuration
-├── docker-compose.yml  # Multi-container orchestration
-├── api_schema.json     # OpenAPI specification
-└── README.md           # This file
+```bash
+docker-compose up -d
 ```
 
-## Data Models
+### Local Development
 
-### TradeOffer
-
-The core entity representing a swap proposal between two users.
-
-**Database Schema:**
-```sql
-CREATE TABLE trade_offers (
-    id SERIAL PRIMARY KEY,
-    proposer_id VARCHAR(100) NOT NULL,
-    receiver_id VARCHAR(100) NOT NULL,
-    offered_item_ids INTEGER[],
-    requested_item_ids INTEGER[],
-    status VARCHAR(20) DEFAULT 'pending',
-    message TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    responded_at TIMESTAMP WITH TIME ZONE
-);
+```bash
+pip install -r requirements.txt
+uvicorn main:app --reload
 ```
-
-**Status Flow:**
-- `pending` → Initial state when offer is created
-- `accepted` → Receiver accepts the offer
-- `rejected` → Receiver rejects the offer
-- `cancelled` → Proposer cancels the offer
-- `completed` → Trade has been completed by both parties
 
 ## API Endpoints
 
-### Health Check
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | Service info |
+| GET | `/health` | Health check |
+| POST | `/api/v1/offers` | Create trade offer |
+| GET | `/api/v1/offers` | List offers (filterable) |
+| GET | `/api/v1/offers/{id}` | Get offer details |
+| PATCH | `/api/v1/offers/{id}` | Update offer status |
+| DELETE | `/api/v1/offers/{id}` | Delete pending offer |
+| GET | `/api/v1/offers/received/{user_id}` | Get received offers |
+| GET | `/api/v1/offers/sent/{user_id}` | Get sent offers |
+| GET | `/api/v1/offers/item/{item_id}` | Get offers for item |
+| GET | `/api/v1/statistics/{user_id}` | Get user statistics |
+| GET | `/metrics` | Prometheus metrics |
 
-#### `GET /`
-Basic health check returning service information.
+## Status Flow
 
-#### `GET /health`
-Detailed health check with service status.
+`pending` → `accepted` / `rejected` / `cancelled` → `completed`
 
-### Trade Offer Management
+- **Proposer**: Can cancel pending, mark accepted as completed
+- **Receiver**: Can accept/reject pending, mark accepted as completed
 
-#### `POST /api/v1/offers`
-Create a new trade offer.
+## Environment Variables
 
-**Request Body:**
-```json
-{
-  "proposer_id": "user123",
-  "receiver_id": "user456",
-  "offered_item_ids": [1, 2],
-  "requested_item_ids": [3],
-  "message": "I'd love to trade my items for yours!"
-}
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | - | PostgreSQL connection string |
+| `SQL_ECHO` | false | Enable SQL query logging |
+| `NOTIFICATION_SERVICE_URL` | http://notifications_service:8000 | Notifications API URL |
+| `CHAT_SERVICE_URL` | http://chat_service:8000 | Chat service API URL |
+| `RABBITMQ_HOST` | rabbitmq | RabbitMQ host |
+| `RABBITMQ_PORT` | 5672 | RabbitMQ port |
+| `CATALOG_GRPC_HOST` | catalog_service | Catalog gRPC host |
+| `CATALOG_GRPC_PORT` | 50051 | Catalog gRPC port |
 
-**Response:** `201 Created`
-```json
-{
-  "id": 1,
-  "proposer_id": "user123",
-  "receiver_id": "user456",
-  "offered_item_ids": [1, 2],
-  "requested_item_ids": [3],
-  "message": "I'd love to trade my items for yours!",
-  "status": "pending",
-  "created_at": "2025-11-24T10:30:00Z",
-  "updated_at": "2025-11-24T10:30:00Z",
-  "responded_at": null
-}
-```
+## Service Integration
 
-**Validations:**
-- Proposer and receiver must be different users
-- No duplicate items in offered or requested lists
-- No overlap between offered and requested items
+- **Catalog Service (gRPC)**: Validates item existence and ownership
+- **Chat Service (HTTP)**: Creates chat rooms on offer acceptance (with circuit breaker)
+- **Notification Service (RabbitMQ)**: Async notifications for status changes
 
----
+## Documentation
 
-#### `GET /api/v1/offers/{offer_id}`
-Get details of a specific trade offer.
-
-**Response:** `200 OK`
-
----
-
-#### `GET /api/v1/offers`
-List trade offers with filtering options.
-
-**Query Parameters:**
-- `user_id` (required): User ID to filter by
-- `status` (optional): Filter by status (pending, accepted, etc.)
-- `as_proposer` (optional): Filter offers where user is proposer
-- `as_receiver` (optional): Filter offers where user is receiver
-- `limit` (optional, default: 20): Number of results
-- `offset` (optional, default: 0): Pagination offset
-
-**Response:** `200 OK` - Array of trade offers
-
----
-
-#### `PATCH /api/v1/offers/{offer_id}`
-Update the status of a trade offer.
-
-**Query Parameters:**
-- `user_id` (required): User performing the action
-
-**Request Body:**
-```json
-{
-  "status": "accepted"
-}
-```
-
-**Authorization Rules:**
-- **Proposer** can:
-  - Cancel pending offers
-  - Mark accepted offers as completed
-- **Receiver** can:
-  - Accept or reject pending offers
-  - Mark accepted offers as completed
-
-**Response:** `200 OK`
-
----
-
-#### `DELETE /api/v1/offers/{offer_id}`
-Delete a trade offer (only pending offers by proposer).
-
-**Query Parameters:**
-- `user_id` (required): User performing the action
-
-**Response:** `204 No Content`
-
----
-
-### User-Specific Endpoints
-
-#### `GET /api/v1/offers/received/{user_id}`
-Get all trade offers received by a user.
-
-**Query Parameters:**
-- `status` (optional): Filter by status
-- `limit` (optional, default: 20)
-- `offset` (optional, default: 0)
-
----
-
-#### `GET /api/v1/offers/sent/{user_id}`
-Get all trade offers sent by a user.
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
 
 **Query Parameters:**
 - `status` (optional): Filter by status
