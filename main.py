@@ -64,11 +64,45 @@ async def lifespan(app: FastAPI):
 # Initialize FastAPI app
 app = FastAPI(
     title="Swappo Matchmaking Service",
-    description=(
-        "Microservice for managing trade offers and matches in the Swappo app - "
-        "a Tinder-like platform for item swapping"
-    ),
+    description="""## Trade Offer & Matching API
+
+**Swappo Matchmaking Service** manages trade offers and matches between users.
+
+### Features
+- 🤝 Create and manage trade offers
+- ✅ Accept/reject/counter trade proposals
+- 💬 Automatic chat room creation on accepted trades
+- 🔔 Async notifications via RabbitMQ
+- 🛡️ Circuit breaker & retry patterns for resilience
+- 📊 Match statistics and analytics
+
+### Trade Flow
+1. User creates trade offer at `/api/v1/offers`
+2. Catalog service validates items via gRPC
+3. Receiver gets notification via RabbitMQ
+4. Update offer status: PENDING → ACCEPTED/REJECTED/COUNTERED
+5. On ACCEPTED: Auto-create chat room via Chat service
+
+### Resilience
+- Circuit breaker for Catalog gRPC calls (opens after 5 failures)
+- Retry logic with exponential backoff (3 attempts)
+- Graceful degradation when services unavailable
+    """,
     version="1.0.0",
+    contact={
+        "name": "Swappo API Support",
+        "url": "https://swappo.art",
+        "email": "api@swappo.art",
+    },
+    license_info={
+        "name": "MIT",
+    },
+    openapi_tags=[
+        {"name": "Health", "description": "Service health and circuit breaker status"},
+        {"name": "Trade Offers", "description": "Create and manage trade proposals"},
+        {"name": "Matches", "description": "View accepted trades and statistics"},
+    ],
+    root_path="/matchmaking",  # Fix for Kong reverse proxy - enables correct OpenAPI schema URLs
     lifespan=lifespan,
 )
 
