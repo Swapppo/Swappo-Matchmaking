@@ -69,12 +69,12 @@ app = FastAPI(
 **Swappo Matchmaking Service** manages trade offers and matches between users.
 
 ### Features
-- 🤝 Create and manage trade offers
-- ✅ Accept/reject/counter trade proposals
-- 💬 Automatic chat room creation on accepted trades
-- 🔔 Async notifications via RabbitMQ
-- 🛡️ Circuit breaker & retry patterns for resilience
-- 📊 Match statistics and analytics
+- Create and manage trade offers
+- Accept/reject/counter trade proposals
+- Automatic chat room creation on accepted trades
+- Async notifications via RabbitMQ
+- Circuit breaker & retry patterns for resilience
+- Match statistics and analytics
 
 ### Trade Flow
 1. User creates trade offer at `/api/v1/offers`
